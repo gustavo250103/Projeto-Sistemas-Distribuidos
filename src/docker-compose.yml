@@ -30,7 +30,7 @@ services:
     image: cc7261:proj
     volumes:
       - ./server:/app
-      - ./data:/app/data # Monta o volume de dados para persistência
+      - ./data:/app/data
     depends_on:
       - broker
       - proxy
@@ -46,10 +46,8 @@ services:
       - server
     volumes:
       - ./client:/app
-    # Removido 'deploy: replicas: 2' para cliente interativo
-    # (Apenas um cliente interativo por terminal)
 
-  listener: # Este serviço parece não estar sendo usado, mas o mantemos
+  listener:
     build:
       context: .
       dockerfile: Dockerfile
@@ -59,13 +57,12 @@ services:
     depends_on:
       - proxy
 
-  # --- NOVO SERVIÇO ---
   bot:
     build:
-      context: ./bot # Contexto da pasta do bot
-      dockerfile: Dockerfile # Dockerfile do bot
-    image: cc7261:bot # Nova imagem para o bot
+      context: ./bot
+      dockerfile: Dockerfile
+    image: cc7261:bot
     depends_on:
       - server
     deploy:
-      replicas: 2 # Executa 2 instâncias do bot
+      replicas: 2
