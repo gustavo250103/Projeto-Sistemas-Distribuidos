@@ -17,20 +17,21 @@ Este repositório implementa um sistema completo de troca de mensagens inspirado
 
 ## Estrutura de Diretórios
 
-`
-ROOT
-├── src/
-│   ├── bot/          -> Bots automáticos (Node.js)
-│   ├── broker/       -> Broker REQ/REP (Python)
-│   ├── client/       -> Cliente interativo (Python)
-│   ├── go-listener/  -> Listener escrito em Go
-│   ├── proxy/        -> Proxy PUB/SUB (Python)
-│   ├── reference/    -> Servidor de referência (Python)
-│   └── server/       -> Servidores principais (Python)
-├── Dockerfile        -> Imagem base dos componentes em Python
-├── docker-compose.yml
-└── README.md
-`
+```
+┌─────────────── Estrutura ───────────────┐
+│                                         │
+│  ┌────────── diretório src/ ───────────┐│
+│  │ bot/          -> Bots automáticos   ││
+│  │ broker/       -> Broker REQ/REP     ││
+│  │ client/       -> Cliente interativo ││
+│  │ go-listener/  -> Listener em Go     ││
+│  │ proxy/        -> Proxy PUB/SUB      ││
+│  │ reference/    -> Servidor referência││
+│  │ server/       -> Servidores Python  ││
+│  └─────────────────────────────────────┘│
+│  Dockerfile | docker-compose.yml | README│
+└─────────────────────────────────────────┘
+```
 
 ---
 
@@ -122,17 +123,32 @@ Após finalizar cada parte: git checkout main, git merge feature/..., git push o
 
 ## Fluxo das mensagens
 
-`
-Clientes/Bots   ->REQ->   Broker   ->DEALER->   Servidores (x3)
-                                  ^
-                                  |
-                           Referência (rank/clock)
-
-Servidores   ->PUB->   Proxy (XPUB/XSUB)   ->SUB->   Clientes/Bots/Go-listener
-              |\
-              | \__ tópico "replica"   -> replicação de dados
-              |____ tópico "servers"   -> anúncios de coordenador
-`
+```
+┌─────────────┐
+│ Reference   │◄────┐
+└─────────────┘     │ REQ/REP
+                    │
+┌──────────┐        │
+│  Broker  │◄───────┤
+└────┬─────┘        │
+     │ REQ/REP      │
+┌────┴─────┬────┬───┴──┐
+│ Server 1 │   │Server │
+│ Server 2 │   │  3    │
+└────┬─────┴────┴───┬──┘
+     │               │
+     │  PUB          │
+     ▼               ▼
+┌────────┐
+│ Proxy  │
+└────┬───┘
+     │ SUB
+┌────┴────────────────────────┐
+│ Client │ Bot 1 │ Bot 2 │ Go │
+└───────┴───────┴───────┴────┘
+(tópico "replica" → replicação de dados)
+(tópico "servers" → anúncios de coordenador)
+```
 
 ---
 
