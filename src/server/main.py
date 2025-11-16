@@ -3,6 +3,7 @@ import socket
 import threading
 import time
 import json
+import uuid
 import zmq
 import msgpack
 
@@ -16,9 +17,14 @@ REFERENCE_PORT = int(os.environ.get('REFERENCE_PORT', '5560'))
 HEARTBEAT_INTERVAL = int(os.environ.get('HEARTBEAT_INTERVAL', '5'))
 LIST_REFRESH_INTERVAL = int(os.environ.get('LIST_REFRESH_INTERVAL', '3'))
 
+REPLICA_TOPIC = "replica"
+SERVERS_TOPIC = "servers"
+
 server_name = os.environ.get('SERVER_NAME', socket.gethostname())
 logical_clock_state = {'value': 0}
 clock_lock = threading.Lock()
+replica_lock = threading.Lock()
+seen_events = set()
 message_counter = 0
 coordinator_name = None
 server_rank = None
@@ -60,6 +66,14 @@ def update_clock(received_clock):
         logical_clock_state['value'] = max(logical_clock_state['value'], received_clock)
         return logical_clock_state['value']
 
+def track_event(event_id):
+    with replica_lock:
+        seen_events.add(event_id)
+
+def already_processed(event_id):
+    with replica_lock:
+        return event_id in seen_events
+
 def reference_request(socket, lock, service, payload):
     request = {
         "service": service,
@@ -79,6 +93,7 @@ def reference_request(socket, lock, service, payload):
 def determine_coordinator_from_list():
     global coordinator_name
     if not server_list:
+        coordinator_name = None
         return
     coordinator = min(server_list, key=lambda item: item['rank'])
     coordinator_name = coordinator['name']
@@ -87,9 +102,7 @@ def heartbeat_loop(reference_socket, reference_lock):
     tick = 0
     while True:
         try:
-            reference_request(reference_socket, reference_lock, "heartbeat", {
-                "user": server_name
-            })
+            reference_request(reference_socket, reference_lock, "heartbeat", {"user": server_name})
             tick += 1
             if tick % LIST_REFRESH_INTERVAL == 0:
                 update_server_list(reference_socket, reference_lock)
@@ -97,22 +110,73 @@ def heartbeat_loop(reference_socket, reference_lock):
             print(f"[Heartbeat] Falha ao comunicar com referência: {e}")
         time.sleep(HEARTBEAT_INTERVAL)
 
-def election_listener(sub_socket):
+def broadcast_replica(pub_socket, event_type, payload):
+    event_id = f"{server_name}:{uuid.uuid4().hex}"
+    track_event(event_id)
+    packet = {
+        "event": event_type,
+        "message_id": event_id,
+        "origin": server_name,
+        "payload": payload,
+        "timestamp": int(time.time()),
+        "clock": increment_clock()
+    }
+    pub_socket.send_multipart([REPLICA_TOPIC.encode('utf-8'), msgpack.packb(packet, use_bin_type=True)])
+
+def process_replica_packet(packet, users, channels):
+    event_id = packet.get("message_id")
+    if not event_id or already_processed(event_id):
+        return
+    track_event(event_id)
+    update_clock(packet.get("clock"))
+    event = packet.get("event")
+    payload = packet.get("payload", {})
+
+    if event == "user":
+        user = payload.get("user")
+        if user and user not in users:
+            users.append(user)
+            save_data(USERS_FILE, users)
+
+    elif event == "channel":
+        channel = payload.get("channel")
+        if channel and channel not in channels:
+            channels.append(channel)
+            save_data(CHANNELS_FILE, channels)
+
+    elif event in ("publish", "direct_message"):
+        entry = payload.get("entry")
+        if not entry:
+            return
+        if event == "publish":
+            channel = entry.get("channel")
+            if channel and channel not in channels:
+                channels.append(channel)
+                save_data(CHANNELS_FILE, channels)
+        log_message(entry)
+
+def subscriber_loop(sub_socket, users, channels):
     global coordinator_name
     while True:
         try:
             topic, payload = sub_socket.recv_multipart()
-            if topic.decode('utf-8') != 'servers':
-                continue
-            message = msgpack.unpackb(payload, raw=False)
-            data = message.get('data', {})
-            update_clock(data.get('clock'))
-            new_coord = data.get('coordinator')
-            if new_coord:
-                coordinator_name = new_coord
-                print(f"[Coordenação] Novo coordenador anunciado: {coordinator_name}")
+            topic = topic.decode('utf-8')
+
+            if topic == SERVERS_TOPIC:
+                message = msgpack.unpackb(payload, raw=False)
+                data = message.get('data', {})
+                update_clock(data.get('clock'))
+                new_coord = data.get('coordinator')
+                if new_coord:
+                    coordinator_name = new_coord
+                    print(f"[Coordenação] Novo coordenador anunciado: {coordinator_name}")
+
+            elif topic == REPLICA_TOPIC:
+                packet = msgpack.unpackb(payload, raw=False)
+                process_replica_packet(packet, users, channels)
+
         except Exception as e:
-            print(f"[Coordenação] Erro ao ouvir coordenações: {e}")
+            print(f"[Subscriber] Erro: {e}")
             time.sleep(1)
 
 def notify_coordinator(pub_socket):
@@ -125,7 +189,7 @@ def notify_coordinator(pub_socket):
         }
     }
     pub_socket.send_multipart([
-        b"servers",
+        SERVERS_TOPIC.encode('utf-8'),
         msgpack.packb(data, use_bin_type=True)
     ])
     print(f"[Coordenação] Servidor '{server_name}' anunciou-se como coordenador.")
@@ -146,9 +210,7 @@ def synchronize_clock(reference_socket, reference_lock, pub_socket):
 
 def request_rank(reference_socket, reference_lock):
     global server_rank
-    response = reference_request(reference_socket, reference_lock, "rank", {
-        "user": server_name
-    })
+    response = reference_request(reference_socket, reference_lock, "rank", {"user": server_name})
     server_rank = response.get('rank')
     update_clock(response.get('clock'))
     if server_rank is None:
@@ -165,11 +227,11 @@ def update_server_list(reference_socket, reference_lock):
     except Exception as e:
         print(f"[Referência] Falha ao atualizar lista de servidores: {e}")
 
-def main():
-    global message_counter, coordinator_name
+users = load_data(USERS_FILE)
+channels = load_data(CHANNELS_FILE)
 
-    users = load_data(USERS_FILE)
-    channels = load_data(CHANNELS_FILE)
+def main():
+    global message_counter
     print(f"Servidor '{server_name}' iniciado. {len(users)} usuários, {len(channels)} canais carregados.")
 
     context = zmq.Context()
@@ -182,7 +244,8 @@ def main():
 
     sub_socket = context.socket(zmq.SUB)
     sub_socket.connect("tcp://proxy:5558")
-    sub_socket.setsockopt_string(zmq.SUBSCRIBE, "servers")
+    sub_socket.setsockopt_string(zmq.SUBSCRIBE, SERVERS_TOPIC)
+    sub_socket.setsockopt_string(zmq.SUBSCRIBE, REPLICA_TOPIC)
 
     reference_socket = context.socket(zmq.REQ)
     reference_socket.connect(f"tcp://{REFERENCE_HOST}:{REFERENCE_PORT}")
@@ -192,7 +255,7 @@ def main():
     update_server_list(reference_socket, reference_lock)
 
     threading.Thread(target=heartbeat_loop, args=(reference_socket, reference_lock), daemon=True).start()
-    threading.Thread(target=election_listener, args=(sub_socket,), daemon=True).start()
+    threading.Thread(target=subscriber_loop, args=(sub_socket, users, channels), daemon=True).start()
 
     print("Servidor pronto para receber requisições...")
 
@@ -213,6 +276,7 @@ def main():
                     if user not in users:
                         users.append(user)
                         save_data(USERS_FILE, users)
+                        broadcast_replica(pub_socket, "user", {"user": user})
                     response = {"status": "sucesso"}
                 else:
                     response = {"status": "erro", "description": "Nome de usuário não fornecido"}
@@ -226,6 +290,7 @@ def main():
                     if channel not in channels:
                         channels.append(channel)
                         save_data(CHANNELS_FILE, channels)
+                        broadcast_replica(pub_socket, "channel", {"channel": channel})
                         response = {"status": "sucesso"}
                     else:
                         response = {"status": "erro", "description": "Canal já existe"}
@@ -254,6 +319,7 @@ def main():
                         msgpack.packb(pub_message, use_bin_type=True)
                     ])
                     log_message(pub_message)
+                    broadcast_replica(pub_socket, "publish", {"entry": pub_message})
                     response = {"status": "OK"}
                 else:
                     response = {"status": "erro", "message": "Canal não existe"}
@@ -277,6 +343,7 @@ def main():
                         msgpack.packb(pub_message, use_bin_type=True)
                     ])
                     log_message(pub_message)
+                    broadcast_replica(pub_socket, "direct_message", {"entry": pub_message})
                     response = {"status": "OK"}
                 else:
                     response = {"status": "erro", "message": "Usuário não existe"}
@@ -299,7 +366,12 @@ def main():
             print(f"Erro ao processar: {e}")
             error_response = {
                 "service": "internal_error",
-                "data": {"status": "erro", "description": str(e), "timestamp": int(time.time()), "clock": increment_clock()}
+                "data": {
+                    "status": "erro",
+                    "description": str(e),
+                    "timestamp": int(time.time()),
+                    "clock": increment_clock()
+                }
             }
             rep_socket.send(msgpack.packb(error_response, use_bin_type=True))
 

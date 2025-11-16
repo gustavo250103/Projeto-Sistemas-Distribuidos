@@ -1,28 +1,21 @@
 import time
 import zmq
 import msgpack
+import threading
 
 clock_state = {'value': 0}
-clock_lock = None
+clock_lock = threading.Lock()
 servers = {}
 next_rank = 1
 current_coordinator = None
 HEARTBEAT_TIMEOUT = 15
 
-def init_clock():
-    global clock_lock
-    if clock_lock is None:
-        import threading
-        clock_lock = threading.Lock()
-
 def increment_clock():
-    init_clock()
     with clock_lock:
         clock_state['value'] += 1
         return clock_state['value']
 
 def update_clock(received_clock):
-    init_clock()
     with clock_lock:
         if received_clock is None:
             return clock_state['value']
