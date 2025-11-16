@@ -1,201 +1,178 @@
-﻿# Sistema Distribuído de Mensageria
+﻿# Distributed Messaging System
 
-Este projeto implementa um sistema completo de troca de mensagens inspirado em BBS/IRC. Utilizamos ZeroMQ para a comunicação entre processos, MessagePack para serialização binária e Docker para orquestrar todos os componentes.
-
-O desenvolvimento foi dividido em cinco partes (mais um serviço extra em Go), cobrindo Request-Reply, Publisher-Subscriber, MessagePack, relógios (Lamport + Berkeley) e replicação de dados.
+This project delivers a full messaging stack inspired by BBS/IRC. ZeroMQ handles the transport layer, MessagePack keeps payloads compact, and Docker orchestrates every process. The work is split across five parts (plus an extra Go service) covering request/reply, publish/subscribe, binary encoding, clocks, and replication.
 
 ---
 
-## Visão Geral
+## Overview
 
-- REQ/REP (Request-Reply) entre clientes e servidores via broker.
-- PUB/SUB (Publish-Subscribe) entre servidores e consumidores via proxy.
-- Serialização binária com MessagePack.
-- Relógios lógicos em todos os processos, sincronização com Berkeley através de um servidor de referência.
-- Replicação eventual de dados entre servidores usando um tópico interno.
-- Múltiplas linguagens: Python, Node.js e Go.
+- REQ/REP between clients and servers via the broker.
+- PUB/SUB between servers and consumers via the proxy.
+- Binary serialization with MessagePack.
+- Lamport clocks on every process and Berkeley clock sync through a reference server.
+- Eventual replication of user/channel/message data between servers.
+- Three programming languages: Python, Node.js, and Go.
 
 ---
 
-## Estrutura de Diretórios
+## Directory layout
 
 `
 .
 ├── src/
-│   ├── bot/              # Bots automáticos (Node.js)
-│   ├── broker/           # Broker REQ/REP (Python)
-│   ├── client/           # Cliente interativo (Python)
-│   ├── go-listener/      # Listener Go (3ª linguagem)
-│   ├── proxy/            # Proxy PUB/SUB (Python)
-│   ├── reference/        # Servidor de referência (Python)
-│   └── server/           # Servidores principais (Python)
-├── Dockerfile            # Imagem base dos serviços em Python
-├── docker-compose.yml    # Orquestração completa dos containers
-└── README.md             # Este documento
+│   ├── bot/          # Node.js bots
+│   ├── broker/       # Python broker (REQ/REP)
+│   ├── client/       # Python interactive client
+│   ├── go-listener/  # Go listener (third language)
+│   ├── proxy/        # Python proxy (PUB/SUB)
+│   ├── reference/    # Python reference server
+│   └── server/       # Python application servers
+├── Dockerfile
+├── docker-compose.yml
+└── README.md
 `
 
 ---
 
-## Componentes
+## Components
 
-| Serviço          | Linguagem | Função principal |
-|------------------|-----------|------------------|
-| reference        | Python    | Distribui rank, heartbeat e clock (algoritmo de Berkeley)
-| broker           | Python    | ROUTER/DEALER para REQ/REP entre clientes e servidores
-| proxy            | Python    | XSUB/XPUB para PUB/SUB
-| server (x3)      | Python    | Processa requisições, persiste e replica dados, sincroniza relógios
-| client           | Python    | Cliente interativo para usuários humanos
-| bot (x2)         | Node.js   | Bots automáticos que publicam mensagens periodicamente
-| go-listener      | Go        | Listener adicional inscrito nos tópicos "geral" e "servers"
-
----
-
-## Funcionalidades por Parte
-
-### Parte 1 – Request-Reply
-- Broker ROUTER/DEALER.
-- Serviços login, users, channel, channels.
-- Persistência inicial em arquivos JSON.
-
-### Parte 2 – Publisher-Subscriber
-- Proxy PUB/SUB separado.
-- Clientes e bots publicam em canais e recebem mensagens.
-- Servidor envia mensagens privadas no tópico do destinatário.
-
-### Parte 3 – MessagePack
-- Toda comunicação REQ/REP e PUB/SUB passa a usar MessagePack.
-- Compatibilidade entre Python e Node.js.
-
-### Parte 4 – Relógios
-- Relógios de Lamport em cada processo.
-- Servidor de referência fornece clock físico (Berkeley) e define o coordenador (menor rank).
-- Coordenador é anunciado no tópico servers.
-
-### Parte 5 – Replicação e Consistência
-- Servidores publicam eventos (login, criação de canal, mensagens) no tópico interno eplica.
-- Todos os servidores assinam esse tópico e aplicam o evento localmente.
-- Deduplicação via message_id (UUID + origem), garantindo consistência eventual.
-
-### Extra – Listener em Go
-- Serviço em Go inscrito nos tópicos geral e servers para atender ao requisito de três linguagens diferentes.
+| Service         | Language | Role |
+|-----------------|----------|------|
+| reference       | Python   | Rank, heartbeat and Berkeley clock server |
+| broker          | Python   | ROUTER/DEALER hub for REQ/REP |
+| proxy           | Python   | XSUB/XPUB hub for PUB/SUB |
+| server (x3)     | Python   | Handles API calls, persists and replicates data, syncs clocks |
+| client          | Python   | CLI for humans |
+| bot (x2)        | Node.js  | Automatic publishers |
+| go-listener     | Go       | Extra listener subscribed to geral and servers |
 
 ---
 
-## Persistência
+## Features per part
 
-| Arquivo             | Descrição |
-|---------------------|-----------|
-| data/users.json   | Usuários cadastrados |
-| data/channels.json| Lista de canais |
-| data/messages.log | Mensagens e publicações |
-
-Cada servidor monta o diretório data local. Como todos replicam os eventos, o conteúdo convergente é o mesmo.
+1. **Part 1** – request/reply, persistence in JSON files.
+2. **Part 2** – publish/subscribe layer, channels and private messages.
+3. **Part 3** – switch to MessagePack for every socket.
+4. **Part 4** – Lamport clocks, Berkeley sync, coordinator election.
+5. **Part 5** – replication topic (eplica) so every server holds the same state.
+6. **Go listener** – bonus service for the third language requirement.
 
 ---
 
-## Execução com Docker
+## Persistence
 
-### Pré-requisitos
-- Docker
-- Docker Compose
+| File               | Content |
+|--------------------|---------|
+| data/users.json  | Registered users |
+| data/channels.json | Channel list |
+| data/messages.log  | Channel and private messages |
 
-### Subir os serviços
-`ash
+Each server mounts its own data directory; replication keeps them aligned.
+
+---
+
+## Running with Docker
+
+### Prerequisites
+- Docker + Docker Compose
+
+### Start everything
+`
 cd src
 docker compose up -d --build
 `
 
-### Acompanhar os logs
-`ash
-docker compose logs -f reference   # rank, heartbeat, clock
-docker compose logs -f server      # requisições, replicação
-docker compose logs -f bot         # bots automáticos
-docker compose logs -f go-listener # listener Go
+### Watch logs
+`
+docker compose logs -f reference
+` 
+`
+docker compose logs -f server
+` 
+`
+docker compose logs -f bot
+` 
+`
+docker compose logs -f go-listener
 `
 
-### Cliente interativo
-`ash
+### Interactive client
+`
 docker compose run --rm client
 `
-1. Digite um nome para login.
-2. Opção 6 para assinar o canal geral.
-3. Opções 4/5 para publicar em canal ou enviar mensagem privada.
+1. Enter a username.  
+2. Option 6 subscribes to geral.  
+3. Options 4/5 publish to a channel or send direct messages.
 
-### Derrubar tudo
-`ash
+### Tear down
+`
 docker compose down
 `
-usar docker compose down -v --remove-orphans para liberar volumes.
+Use docker compose down -v --remove-orphans to drop volumes.
 
 ---
 
-## Branches e Partes
+## Branches
 
-| Branch                         | Parte | Descrição |
-|--------------------------------|-------|-----------|
-| feature/parte1-request-reply   | 1     | Broker REQ/REP e persistência inicial |
-| feature/parte2-pub-sub         | 2     | Camada PUB/SUB, canais e privadas |
-| feature/parte3-messagepack     | 3     | Migração para MessagePack |
-| feature/parte4-relogios        | 4     | Relógios Lamport + sincronização Berkeley |
-| feature/parte5-consistencia    | 5     | Replicação e consistência eventual |
-| feature/go-listener            | Extra | Listener Go (terceira linguagem) |
+| Branch                      | Description |
+|-----------------------------|-------------|
+| feature/parte1-request-reply| Part 1 implementation |
+| feature/parte2-pub-sub      | Part 2 implementation |
+| feature/parte3-messagepack  | Part 3 implementation |
+| feature/parte4-relogios     | Part 4 implementation |
+| feature/parte5-consistencia | Part 5 implementation |
+| feature/go-listener         | Go listener service |
 
-### Acessar cada branch
-`ash
-git checkout feature/parte1-request-reply
-# testes da parte 1
-
-git checkout feature/parte2-pub-sub
-# e assim por diante
+Switch example:
 `
-Após cada parte: git checkout main, git merge feature/..., git push origin main.
+git checkout feature/parte3-messagepack
+`
+Merge into main and push after each part.
 
 ---
 
-## Fluxo das mensagens (ASCII)
+## Message flow (ASCII)
 
 `
-Clientes/Bots  --REQ-->  Broker (ROUTER)  --DEALER-->  Servidores (x3)
+Clients/Bots  --REQ-->  Broker (ROUTER)  --DEALER-->  Servers (x3)
                                  ^
                                  |
-                                Reference (rank/clock)
+                           Reference server
 
-Servidores  --PUB-->  Proxy (XPUB/XSUB)  --SUB-->  Clients/Bots/Go-Listener
+Servers  --PUB-->  Proxy (XPUB/XSUB)  --SUB-->  Clients/Bots/Go listener
             |\
-            | \__ tópico "replica" -> replicação de dados
-            |____ tópico "servers" -> anúncios de coordenador
+            | \__ topic "replica" -> data replication
+            |____ topic "servers" -> coordinator events
 `
 
 ---
 
-## Testes Sugeridos
+## Suggested tests
 
-1. **Replicação**: com o stack rodando, envie mensagens e derrube src-server-1. Verifique eference atualizando o rank e, ao reiniciar o servidor, note que o histórico permanece coerente.
-2. **Relógios**: observe o campo clock nas respostas do cliente; a contagem continua mesmo após replicações.
-3. **Listener Go**: docker compose logs -f go-listener mostra todas as mensagens recebidas em geral e servers.
+1. **Replication** – send traffic, stop src-server-1, observe eference, restart the server and confirm the history remains.
+2. **Clocks** – watch the clock field returned to the client to verify Lamport updates.
+3. **Go listener** – docker compose logs -f go-listener should show messages from geral and coordinator announcements.
 
 ---
 
-## Tecnologias
+## Technologies
 - ZeroMQ (pyzmq, zeromq.js, zmq4)
 - MessagePack
-- Docker Compose
-- Python 3.13
-- Node.js 20
-- Go 1.22
+- Docker + Docker Compose
+- Python 3.13, Node.js 20, Go 1.22
 
 ---
 
-## Critérios Atendidos
-- Cliente com bibliotecas corretas, REQ/REP + PUB/SUB, relógio lógico.
-- Bots automáticos (Node.js) seguindo o protocolo.
-- Broker/proxy/reference funcionando com ranks, heartbeat e relógios.
-- Servidores com relógios, sincronização Berkeley, eleição e replicação de dados.
-- Documentação completa neste README.
-- Apresentação possível pela combinação de logs e scripts.
-- Três linguagens: Python, Node.js e Go.
+## Criteria satisfied
+- Client uses the right libraries, REQ/REP + PUB/SUB, Lamport clock.
+- Bots publish automatically via the specified protocol.
+- Broker, proxy and reference server implement rank, heartbeat and clock sync.
+- Application servers maintain Lamport clocks, Berkeley sync, coordinator election and data replication.
+- Documentation is consolidated in this README.
+- Presentation can be done through the provided logs/commands.
+- Three different languages are in use.
 
 ---
 
-## Licença
-Projeto desenvolvido para a disciplina de Sistemas Distribuídos.
+## License
+Project developed for the Distributed Systems course.
