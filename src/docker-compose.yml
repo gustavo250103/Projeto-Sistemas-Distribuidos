@@ -62,16 +62,6 @@ services:
     volumes:
       - ./client:/app
 
-  listener:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: cc7261:listener
-    volumes:
-      - ./listener:/app
-    depends_on:
-      - proxy
-
   bot:
     build:
       context: ./bot
@@ -81,3 +71,14 @@ services:
       - server
     deploy:
       replicas: 2
+
+  go-listener:
+    build:
+      context: ./go-listener
+      dockerfile: Dockerfile
+    image: cc7261:go-listener
+    depends_on:
+      - proxy
+    environment:
+      - PROXY_SUB_ENDPOINT=tcp://proxy:5558
+      - LISTENER_TOPICS=geral,servers
