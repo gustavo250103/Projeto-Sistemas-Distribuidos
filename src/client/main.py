@@ -10,6 +10,21 @@ req_port = 5555
 sub_address = "proxy"
 sub_port = 5558
 
+logical_clock_state = {'value': 0}
+clock_lock = threading.Lock()
+
+def increment_clock():
+    with clock_lock:
+        logical_clock_state['value'] += 1
+        return logical_clock_state['value']
+
+def update_clock(received_clock):
+    with clock_lock:
+        if received_clock is None:
+            return logical_clock_state['value']
+        logical_clock_state['value'] = max(logical_clock_state['value'], received_clock)
+        return logical_clock_state['value']
+
 context = zmq.Context()
 req_socket = context.socket(zmq.REQ)
 req_socket.connect(f"tcp://{req_address}:{req_port}")
@@ -22,6 +37,7 @@ req_lock = threading.Lock()
 def receiver_thread(username):
     print(f"\n[Receptor] Inscrito no tópico: {username}")
     sub_socket.setsockopt_string(zmq.SUBSCRIBE, username)
+    sub_socket.setsockopt_string(zmq.SUBSCRIBE, "servers")
 
     while True:
         try:
@@ -29,6 +45,7 @@ def receiver_thread(username):
             message = msgpack.unpackb(data, raw=False)
             topic = topic.decode('utf-8')
 
+            update_clock(message.get('clock'))
             dt = datetime.fromtimestamp(message['timestamp']).strftime('%H:%M:%S')
             print("\r" + " " * 80 + "\r", end='')
 
@@ -36,6 +53,8 @@ def receiver_thread(username):
                 print(f"[{dt}][Canal: {topic}] {message['user']}: {message['message']}")
             elif message.get('type') == 'private':
                 print(f"[{dt}][Privado de: {message['from']}]: {message['message']}")
+            elif message.get('service') == 'election':
+                print(f"[{dt}][Coordenação] Novo coordenador: {message['data'].get('coordinator')}")
 
             print("Escolha uma opção: ", end='', flush=True)
 
@@ -46,7 +65,10 @@ def receiver_thread(username):
 def send_request(service, data):
     request_data = {
         "service": service,
-        "data": data
+        "data": {
+            **data,
+            "clock": increment_clock()
+        }
     }
 
     with req_lock:
@@ -58,8 +80,10 @@ def send_request(service, data):
             print(f"Erro de comunicação com o broker: {e}")
             return {"status": "erro", "description": "Falha no broker"}
 
-    print(f"\n[Resposta do Servidor]: {response.get('data')}")
-    return response.get('data', {})
+    response_data = response.get('data', {})
+    update_clock(response_data.get('clock'))
+    print(f"\n[Resposta do Servidor]: {response_data}")
+    return response_data
 
 def main_menu(username):
     print("\n--- Menu Principal ---")

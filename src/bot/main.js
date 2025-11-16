@@ -8,13 +8,33 @@ const username = `bot-${randomBytes(4).toString("hex")}`;
 const reqSocket = new zmq.Request();
 reqSocket.connect(reqAddress);
 
+let logicalClock = 0;
+
+const incrementClock = () => {
+  logicalClock += 1;
+  return logicalClock;
+};
+
+const updateClock = (received) => {
+  if (typeof received !== "number") return logicalClock;
+  logicalClock = Math.max(logicalClock, received);
+  return logicalClock;
+};
+
 console.log(`Bot ${username} iniciado.`);
 
 async function sendRequest(service, data) {
-  const request = { service, data };
+  const request = {
+    service,
+    data: {
+      ...data,
+      clock: incrementClock(),
+    },
+  };
   await reqSocket.send(encode(request));
   const [result] = await reqSocket.receive();
   const response = decode(result);
+  updateClock(response?.data?.clock);
   return response.data;
 }
 

@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cc7261:proj
+    image: cc7261:broker
     container_name: broker
     volumes:
       - ./broker:/app
@@ -15,7 +15,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cc7261:proj
+    image: cc7261:proxy
     container_name: proxy
     volumes:
       - ./proxy:/app
@@ -23,49 +23,61 @@ services:
       - 5557:5557
       - 5558:5558
 
+  reference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cc7261:reference
+    container_name: reference
+    volumes:
+      - ./reference:/app
+
   server:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cc7261:proj
+    image: cc7261:server
     volumes:
       - ./server:/app
-      - ./data:/app/data # Monta o volume de dados para persistência
+      - ./data:/app/data
     depends_on:
       - broker
       - proxy
+      - reference
+    environment:
+      - REFERENCE_HOST=reference
+      - REFERENCE_PORT=5560
+    deploy:
+      replicas: 3
 
   client:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cc7261:proj
+    image: cc7261:client
     stdin_open: true
     tty: true
     depends_on:
       - server
     volumes:
       - ./client:/app
-    # Removido 'deploy: replicas: 2' para cliente interativo
-    # (Apenas um cliente interativo por terminal)
 
-  listener: # Este serviço parece não estar sendo usado, mas o mantemos
+  listener:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cc7261:proj
+    image: cc7261:listener
     volumes:
       - ./listener:/app
     depends_on:
       - proxy
 
-  # --- NOVO SERVIÇO ---
   bot:
     build:
-      context: ./bot # Contexto da pasta do bot
-      dockerfile: Dockerfile # Dockerfile do bot
-    image: cc7261:bot # Nova imagem para o bot
+      context: ./bot
+      dockerfile: Dockerfile
+    image: cc7261:bot
     depends_on:
       - server
     deploy:
-      replicas: 2 # Executa 2 instâncias do bot
+      replicas: 2
