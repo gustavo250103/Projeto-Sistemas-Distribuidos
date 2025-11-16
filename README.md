@@ -10,14 +10,15 @@ Este repositório implementa um sistema completo de troca de mensagens inspirado
 - Comunicação **PUB/SUB** entre servidores e consumidores via proxy.
 - Serialização binária com MessagePack.
 - Relógios lógicos (Lamport) em todos os processos e sincronização Berkeley via servidor de referência.
-- Replicação eventual: todos os servidores recebem cada operação via tópico interno eplica.
+- Replicação eventual: todos os servidores recebem cada operação via tópico interno 
+eplica.
 - Linguagens: **Python**, **Node.js** e **Go**.
 
 ---
 
 ## Estrutura de Diretórios
 
-`	ext
+`	text
 .
 ├── src/
 │   ├── bot/              # Bots automáticos (Node.js)
@@ -54,7 +55,8 @@ Este repositório implementa um sistema completo de troca de mensagens inspirado
 2. **Parte 2 – Publish/Subscribe**: canais públicos, mensagens privadas e bots automáticos.
 3. **Parte 3 – MessagePack**: todas as mensagens passam para formato binário.
 4. **Parte 4 – Relógios**: Lamport em todos, sincronização Berkeley, eleição do coordenador.
-5. **Parte 5 – Replicação**: eventos de usuário/canal/mensagem são propagados via tópico eplica.
+5. **Parte 5 – Replicação**: eventos de usuário/canal/mensagem são propagados via tópico 
+eplica.
 6. **Listener Go**: terceira linguagem exigida, assinando tópicos do proxy.
 
 ---
@@ -124,7 +126,7 @@ Faça checkout de cada branch com git checkout <nome>; após finalizar a parte, 
 
 ## Fluxo das mensagens
 
-`	ext
+`	text
 Clientes/Bots --REQ--> Broker --DEALER--> Servidores (x3)
                               ^
                               |
@@ -140,7 +142,9 @@ Servidores --PUB--> Proxy (XPUB/XSUB) --SUB--> Clientes/Bots/Go-listener
 
 ## Testes sugeridos
 
-1. **Replicação** – envie mensagens, pare src-server-1 e observe eference. Ao religar, o histórico permanece íntegro graças ao tópico eplica.
+1. **Replicação** – envie mensagens, pare src-server-1 e observe 
+eference. Ao religar, o histórico permanece íntegro graças ao tópico 
+eplica.
 2. **Relógios** – acompanhe o campo clock retornado às chamadas; os incrementos de Lamport aparecem para cada evento.
 3. **Listener Go** – docker compose logs -f go-listener exibe todas as mensagens recebidas em geral e servers.
 
